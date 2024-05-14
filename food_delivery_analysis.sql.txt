@@ -1,0 +1,61 @@
+WITH 
+-- Extracting relevant information from UberEats data
+UberEats_Info AS (
+  SELECT 
+    vb_name AS uber_slug,
+    JSON_EXTRACT_SCALAR(response, '$.regularHours[OFFSET(0)].hours') AS uber_hours,
+    JSON_EXTRACT_SCALAR(response, '$.regularHours[OFFSET(0)].daysBitArray') AS uber_days
+  FROM 
+    `arboreal-vision-339901.take_home_v2.virtual_kitchen_ubereats_hours`
+),
+
+-- Extracting relevant information from Grubhub data
+Grubhub_Info AS (
+  SELECT 
+    vb_name AS grubhub_slug,
+    JSON_EXTRACT_SCALAR(response, '$.regularHours[OFFSET(0)].hours') AS grubhub_hours,
+    JSON_EXTRACT_SCALAR(response, '$.regularHours[OFFSET(0)].daysBitArray') AS grubhub_days
+  FROM 
+    `arboreal-vision-339901.take_home_v2.virtual_kitchen_grubhub_hours`
+),
+
+-- Joining UberEats and Grubhub data on slug
+Combined_Info AS (
+  SELECT 
+    UberEats_Info.uber_slug,
+    UberEats_Info.uber_hours AS uber_hours,
+    UberEats_Info.uber_days AS uber_days,
+    Grubhub_Info.grubhub_slug,
+    Grubhub_Info.grubhub_hours AS grubhub_hours,
+    Grubhub_Info.grubhub_days AS grubhub_days
+  FROM 
+    UberEats_Info
+  JOIN 
+    Grubhub_Info
+  ON 
+    UberEats_Info.uber_slug = Grubhub_Info.grubhub_slug
+),
+
+-- Calculating business hour mismatch
+Mismatch AS (
+  SELECT 
+    *,
+    CASE 
+      WHEN grubhub_hours IS NULL THEN 'No Grubhub Data'
+      WHEN uber_hours = grubhub_hours THEN 'In Range'
+      WHEN ABS(TIME_DIFF(uber_hours, grubhub_hours, MINUTE)) <= 5 THEN 'Out of Range with 5 mins difference'
+      ELSE 'Out of Range'
+    END AS is_out_of_range
+  FROM 
+    Combined_Info
+)
+
+-- Final output
+SELECT 
+  grubhub_slug,
+  grubhub_hours AS virtual_restaurant_business_hours,
+  uber_slug,
+  uber_hours AS uber_eats_business_hours,
+  is_out_of_range
+FROM 
+  Mismatch;
